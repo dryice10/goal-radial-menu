@@ -76,6 +76,16 @@
   (none)
 )
 
+(defun circular-cam-mode ()
+  (dm-cam-mode-func cam-circular (debug-menu-msg press))
+  (none)
+)
+
+(defun lock-cam ()
+  (dm-cam-externalize 'locked (debug-menu-msg press))
+  (none)
+)
+
 ;;;;;
 ;;;;;
 
@@ -112,7 +122,6 @@
   (slots rmenu-slot-array)
   )
   (:state-methods
-    ;;active
     closing
     idle
     active-hold
@@ -151,9 +160,9 @@
 ;;;;; 2nd string gets skipped if you leave it ""
 ;;;;;
 (defbehavior fill-slots radial-menu ()
-  (fill-slot-i 0  "Normal Jak"       ""          normal-func)
-  (fill-slot-i 1  "   Red"          ""          red-func)
-  (fill-slot-i 2  " Green"        ""          green-func)
+  (fill-slot-i 0  "   Red"          ""          red-func)
+  (fill-slot-i 1  " Green"        ""          green-func)
+  (fill-slot-i 2  "Lock Cam"       ""          lock-cam)
   (fill-slot-i 3  "Close the"     "menu"          close-func)
   (fill-slot-i 4  "Trip Him"     ""          trip-func)
   (fill-slot-i 5  "test5"        ""      print-func)

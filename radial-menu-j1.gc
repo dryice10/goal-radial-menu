@@ -1,0 +1,483 @@
+;;;;;
+;;;;; Radial menu (Jak 1 Version)
+;;;;; 
+;;;;; Ctrl+F for fill-slots and edit it with your strings/functions
+;;;;; Compile and then run (radial-menu-on) to turn on
+
+;;;;;
+;;;;; Adjust these variables
+;;;;;
+(define *rmenu-x-pos* 70)      ;;center of menu x position
+(define *rmenu-y-pos* 100)      ;;center of menu y position
+(define *rmenu-button* (pad-buttons r1))    ;;button to show menu, use a (pad-buttons)
+(define *rmenu-selection-button* (pad-buttons x))  ;;button to select a option use a (pad-buttons), or (the pad-buttons #f)
+(define *left-stick?* #t)       ;;#t for left stick, #f for right stick
+(define *need-hold?* #f)        ;;this switches between hold and toggle to open menu
+(define *close-on-select?* #t)  ;;if true, closes the menu after pressing an option
+(define *select-on-close?* #f)  ;;if true, when you close the menu, selects the current option
+(define *sticky-selection?* #t)    ;;keeps the last option highlighted after you let go of the stick
+(define *default-menu-color* (new 'static 'rgba :r 50 :g 50 :b 160 :a 95)) ;;the default menu card color
+
+
+;;probably not these
+(define *rmenu-width* 50)
+(define *rmenu-height* 20)
+
+;;;;;
+;;;;; Some example functions. Needs to return (none).
+;;;;;
+
+(defun print-func ()
+  (format #t "~%~%~%~%~%~%beans~%")
+  (none)
+)
+
+(defun green-func ()
+  (set! (-> *target* draw color-mult x) 1.0)
+  (set! (-> *target* draw color-mult y) 5.0)
+  (set! (-> *target* draw color-mult z) 1.0)
+  (none)
+)
+
+(defun red-func ()
+  (set! (-> *target* draw color-mult x) 5.0)
+  (set! (-> *target* draw color-mult y) 1.0)
+  (set! (-> *target* draw color-mult z) 1.0)
+  (none)
+)
+
+(defun normal-func ()
+  (set! (-> *target* draw color-mult x) 1.0)
+  (set! (-> *target* draw color-mult y) 1.0)
+  (set! (-> *target* draw color-mult z) 1.0)
+  (none)
+)
+
+(defun trip-func ()
+  (go-process *target* target-load-wait)
+  (none)
+)
+
+(define-extern close-func (function none)) ;;wrapper function for another way to close menu (defined below)
+
+(defun circular-cam-mode ()
+  (dm-cam-mode-func cam-circular (debug-menu-msg press))
+  (none)
+)
+
+(defun lock-cam ()
+  (dm-cam-externalize 'locked (debug-menu-msg press))
+  (none)
+)
+
+(defun tp-to-snowy ()
+  (start 'play (get-continue-by-name *game-info* "snow-start"))
+  (none)
+)
+
+(defun collision-func ()
+  (dm-toggle-collision-pick-func '*collision-renderer* (debug-menu-msg press))
+  (none)
+)
+;;;;;
+;;;;;
+
+
+
+(deftype rmenu-slot (basic)
+  ((msg string)
+    (msg2 string)
+   (func (function none))
+   (text-color int)
+   (color rgba)))
+
+
+(deftype rmenu-slot-array (inline-array-class)
+  ((data rmenu-slot :inline :dynamic)))
+
+;;;;;important;;;;;
+(set! (-> rmenu-slot-array heap-base) (the uint 64))
+
+(define *max-slots* 8)
+
+(deftype radial-menu (process)
+  ((x-start int)
+  (y-start int)
+  (left-stick? symbol) ;;which stick to control the menu
+  (button pad-buttons)
+  (sel-button pad-buttons)
+  (need-hold? symbol)
+  (close-on-select? symbol) 
+  (select-on-close? symbol)
+  (sticky-selection? symbol)
+
+  (selected? int)
+  (slots rmenu-slot-array)
+  )
+  (:state-methods
+    closing
+    idle
+    active-hold
+    active-toggle)
+  (:methods
+    (relocate (_type_ int) _type_)
+    ))
+
+;;hat
+(defmethod relocate ((this radial-menu) (offset int))
+  (when (nonzero? (-> this slots))
+    (dotimes (i *max-slots*)
+      (when (nonzero? (-> this slots data i msg))
+       (&+! (-> this slots data i msg) offset))
+      (when (nonzero? (-> this slots data i msg2))
+       (&+! (-> this slots data i msg2) offset)))
+    (&+! (-> this slots) offset))
+  (call-parent-method this offset))
+
+
+(defbehavior color-slot-i radial-menu ((i int) (t int) (c rgba))
+  (set! (-> self slots data i text-color) t)
+  (set! (-> self slots data i color) c)
+)
+
+(defbehavior fill-slot-i radial-menu ((i int) (s string) (s2 string) (f (function none)))
+  (copy-string<-string (-> self slots data i msg) s)
+  (copy-string<-string (-> self slots data i msg2) s2)
+  (set! (-> self slots data i func) f)
+)
+
+
+;;;;;
+;;;;; Edit these to add your own menu options
+;;;;; Requires a string and a function (without the parentheses)
+;;;;; 2nd string gets skipped if you leave it ""
+;;;;;
+(defbehavior fill-slots radial-menu ()
+  (fill-slot-i 0  "   Red"          ""          red-func)
+  (fill-slot-i 1  " Green"        ""          green-func)
+  (fill-slot-i 2  "Lock Cam"       ""          lock-cam)
+  (fill-slot-i 3  "Close the"     "menu"          close-func)
+  (fill-slot-i 4  "Trip Him"     ""          trip-func)
+  (fill-slot-i 5  "Collision"        "Renderer"      collision-func)
+  (fill-slot-i 6  "Go to Snowy"     ""          tp-to-snowy)
+  (fill-slot-i 7  "test7"     ""          print-func)
+(none))
+
+;;;;; Edit these to change color per menu option
+;;;;; Text color is an int, menu color is an rgba like (static-rgba 240 100 200 70)
+(defbehavior color-slots radial-menu ()
+  (color-slot-i 0   0   *default-menu-color*)
+  (color-slot-i 1   0   *default-menu-color*)
+  (color-slot-i 2   0   *default-menu-color*)
+  (color-slot-i 3   0   *default-menu-color*)
+  (color-slot-i 4   3   *default-menu-color*)
+  (color-slot-i 5   0   *default-menu-color*)
+  (color-slot-i 6   0   *default-menu-color*)
+  (color-slot-i 7   0   *default-menu-color*)
+(none))
+;;;;;
+;;;;;
+
+
+;; (defun draw-string-xy-scaled ((str string) (buf dma-buffer) (x int) (y int) (color font-color) (flags font-flags) (scale float))
+;;   "Draw a string at the given xy location, with the given scale."
+;;   (let* ((font-ctxt (new 'stack 'font-context *font-default-matrix* x y 0.0 color flags)))
+;;          (set! (-> font-ctxt scale) scale)
+;;     (draw-string str buf font-ctxt))
+;;   (none))
+
+(defun calc-rstick-dir ()
+  (let ((f30-0 (* 0.0078125 (the float (+ (-> *cpad-list* cpads 0 rightx) -128))))
+        (f28-0 (* 0.0078125 (the float (- 127 (the-as int (-> *cpad-list* cpads 0 righty))))))
+        )
+    (atan (- f30-0) f28-0)
+    )
+)
+
+(defun calc-rstick-speed ()
+  (let ((f30-0 (* 0.0078125 (the float (+ (-> *cpad-list* cpads 0 rightx) -128))))
+        (f28-0 (* 0.0078125 (the float (- 127 (the-as int (-> *cpad-list* cpads 0 righty))))))
+        )
+    (fmin 1.0 (sqrtf (+ (* f30-0 f30-0) (* f28-0 f28-0))))
+    )
+)
+
+(defun ceil ((arg0 float))
+  "Round (up) to an integer"
+  (let ((f0-3 (the float (the int arg0))))
+    (if (or (>= 0.0 arg0) (= arg0 f0-3))
+        f0-3
+        (+ 1.0 f0-3)
+        )
+    )
+  )
+
+
+;;given a stick direction, return 0-7
+(defun stick-dir-to-8 ((dir float))
+  ;;right side is negative, add full rot to make it positive
+  (when (> 0.0 dir)
+    (+! dir DEGREES_PER_ROT))
+  (/! dir (/ DEGREES_PER_ROT 8.0)) ;;8192 ;;gets 1/8 of a rotation instead of 1/6565536
+  ;;(format #t "rot ~f " dir)
+  ;;shift by .5 and take the ceiling to get an int 0-8
+  (-! dir 0.5)
+  (set! dir (ceil dir))
+  
+  ;;(format #t "rot ~d" (mod (the int dir) 8))
+  (mod (the int dir) 8)
+)
+
+;;gives offset vector for positioning menu options
+(defun vec-slot-offset ((slot int))
+  (let ((ret-vec (static-vector 0.0 0.0 0.0 0.0)))
+    (when (= slot 0)
+      (set-vector! ret-vec 0.0 -33.0 0.0 0.0))
+    (when (= slot 1)
+      (set-vector! ret-vec -55.0 -25.0 0.0 0.0))
+    (when (= slot 2)
+      (set-vector! ret-vec -65.0 0.0 0.0 0.0))
+    (when (= slot 3)
+      (set-vector! ret-vec -55.0 25.0 0.0 0.0))
+    (when (= slot 4)
+      (set-vector! ret-vec 0.0 33.0 0.0 0.0))
+    (when (= slot 5)
+      (set-vector! ret-vec 55.0 25.0 0.0 0.0))
+    (when (= slot 6)
+      (set-vector! ret-vec 65.0 0.0 0.0 0.0))
+    (when (= slot 7)
+      (set-vector! ret-vec 55.0 -25.0 0.0 0.0))
+  ret-vec)
+)
+
+;;checks button0-abs 1 instead of 0
+(defmacro cpad-held-last-frame (pad-idx)
+  `(-> *cpad-list* cpads ,pad-idx button0-abs 1)
+)
+
+;;init and set the internal variables equal to the user defined globals
+(defbehavior radial-menu-init-by-other radial-menu ()
+  (set! (-> self x-start) *rmenu-x-pos*)
+  (set! (-> self y-start) *rmenu-y-pos*)
+  (set! (-> self button) *rmenu-button*) ;;512 r2, 4 r3
+  (set! (-> self sel-button) *rmenu-selection-button*) ;;512 r2, 4 r3
+  (set! (-> self need-hold?) *need-hold?*)
+  (set! (-> self close-on-select?) *close-on-select?*)
+  (set! (-> self select-on-close?) *select-on-close?*)
+  (set! (-> self sticky-selection?) *sticky-selection?*)
+  (set! (-> self left-stick?) *left-stick?*)
+
+  (set! (-> self selected?) -1) ;;init with no item selected
+  (set! (-> self slots) (new 'process 'rmenu-slot-array *max-slots*))
+  ;;set up dummy cards in slots
+  (dotimes (i (-> self slots length))
+    (set! (-> self slots data i msg) (new 'process 'string 512 (the string #f)))
+    (set! (-> self slots data i msg2) (new 'process 'string 512 (the string #f)))
+    (set! (-> self slots data i func) (the (function none) #f))
+    (set! (-> self slots data i text-color) 0)
+    (set! (-> self slots data i color) *default-menu-color*)
+    )
+  ;;replace with real menu slots
+  (fill-slots)
+  (color-slots)
+  (go-virtual idle)
+)
+
+
+(defbehavior draw-radial-menu radial-menu ()
+  (with-dma-buffer-add-bucket ((testbuf (-> (current-frame) global-buf)) (bucket-id debug-no-zbuf))
+    ;;center mark
+    (draw-sprite2d-xy testbuf 
+      (+ (-> self x-start) 21)
+      (+ (-> self y-start) 7)
+      5
+      6
+      *default-menu-color*)
+    (draw-string-xy-scaled
+      "Y"
+      testbuf
+      (+ (-> self x-start) 22)
+      (+ (-> self y-start) 8)
+      (the font-color 2)
+      (font-flags large)
+      0.2)
+    
+    ;;draw squares at an offset in a circle, draw text on that
+    (dotimes (i (-> self slots length))
+      (let ((vec (vec-slot-offset i)))
+        ;;background box for border/highlight
+        (draw-sprite2d-xy testbuf 
+          (- (+ (-> self x-start) (-> vec x)) 1)
+          (- (+ (-> self y-start) (-> vec y)) 1)
+          (+ *rmenu-width* 2)
+          (+ *rmenu-height* 2)
+          (if (= i (-> self selected?))
+            (new 'static 'rgba :r 155 :g 155 :b 155 :a 127)
+            (new 'static 'rgba :r 5 :g 5 :b 5 :a 127))
+          )
+        ;;main box
+        (draw-sprite2d-xy testbuf
+          (+ (-> self x-start) (-> vec x))
+          (+ (-> self y-start) (-> vec y))
+          *rmenu-width*
+          *rmenu-height*
+          (-> self slots data i color))
+        ;;draw the message
+        (draw-string-xy-scaled
+          (string-format "~s" (-> self slots data i msg))
+          testbuf
+          (+ (-> self x-start) (-> vec x) 2)
+          (+ (-> self y-start) (-> vec y) 4)
+          (the font-color (-> self slots data i text-color))
+          (font-flags  shadow kerning)
+          0.8)
+        ;;draw the message2 if its not empty ""
+        (when (not (string= (-> self slots data i msg2) ""))
+          (draw-string-xy-scaled
+          (string-format "~s" (-> self slots data i msg2))
+          testbuf
+          (+ (-> self x-start) (-> vec x) 2)
+          (+ (-> self y-start) (-> vec y) 10)
+          (the font-color (-> self slots data i text-color))
+          (font-flags  shadow kerning)
+          0.8))
+      )
+    )
+  )
+)
+
+
+(defbehavior radial-menu-do-func radial-menu ()
+  (when (!= (-> self selected?) -1)
+    (when (!= (-> self slots data (-> self selected?) func) #f)
+      ;;do func
+      ((-> self slots data (-> self selected?) func))
+      (if (not (-> self sticky-selection?))
+        (set! (-> self selected?) -1)
+      )
+      )
+    (if (-> self close-on-select?)
+      (go-virtual idle)
+    )
+  )
+)
+
+
+;;check for stick input and update selected item
+(defbehavior radial-menu-input radial-menu ()
+  (if (not (-> self sticky-selection?))
+    (set! (-> self selected?) -1)
+  )
+  (if (= (-> self left-stick?) #t)
+    (when (> (-> *cpad-list* cpads 0 stick0-speed) STICK_DEADZONE)
+      (set! (-> self selected?) (stick-dir-to-8 (-> *cpad-list* cpads 0 stick0-dir)))
+    )
+    (when (> (calc-rstick-speed) STICK_DEADZONE)
+      (set! (-> self selected?) (stick-dir-to-8 (calc-rstick-dir)))
+    )
+  )
+  (when (!= (-> self sel-button) #f)
+    (when (logtest? (cpad-pressed 0) (-> self sel-button))
+        (radial-menu-do-func)
+    )
+  )
+  (none)
+)
+
+
+(defstate closing (radial-menu)
+  :virtual #t
+  :code (behavior ()
+  (loop
+      (if (-> self select-on-close?)
+          (radial-menu-do-func)
+          )
+       (when (logtest? (cpad-hold 0) (-> self button))
+        (suspend)
+       )
+      (go-virtual idle)
+
+  (suspend))
+  )
+)
+
+
+(defstate active-hold (radial-menu)
+  :virtual #t
+  :code (behavior ()
+    (loop
+      (cond 
+        ((logtest? (cpad-hold 0) (-> self button))
+          (draw-radial-menu)
+          (radial-menu-input)
+          )
+        ((logtest? (cpad-held-last-frame 0) (-> self button))
+          (go-virtual closing)
+        )
+      )
+    (suspend)))
+)
+
+(defstate active-toggle (radial-menu)
+  :virtual #t
+  :code (behavior ()
+    (loop
+
+      (draw-radial-menu)
+      (radial-menu-input)
+      
+      (when (logtest? (cpad-pressed 0) (-> self button))
+        (go-virtual closing)
+      )
+
+    (suspend)))
+)
+
+(defstate idle (radial-menu)
+  :virtual #t
+  :code (behavior ()
+    (loop
+        ;;press button to go to active
+        (when (logtest? (cpad-pressed 0) (-> self button))
+          (when (logtest? (cpad-hold 0) (-> self button))
+            (suspend)
+          )
+          (if (-> self need-hold?)
+            (go-virtual active-hold)
+            (go-virtual active-toggle)
+          )
+        )
+    (suspend)))
+  )
+
+
+
+(defmacro go-virtual-process (proc next-state &rest args)
+  "Make another process go-virtual."
+  `(with-pp
+     (protect (pp)
+              (set! pp ,proc)
+              (go-hook pp (method-of-object ,proc ,next-state) ,@args)
+              )
+     )
+  )
+
+;;wrapper function for another way to close menu
+(defun close-func ()
+  (suspend)
+  (go-virtual-process (the radial-menu (process-by-name "radial-menu" *active-pool*)) idle)
+  (none)
+)
+
+(define *radial-menu-on?* #f) ;;main on/off switch
+
+(defun radial-menu-on ()
+  (set! *radial-menu-on?* #t)
+  (process-spawn radial-menu)
+  (none))
+
+(defun radial-menu-off ()
+  "Kill the process"
+  (set! *radial-menu-on?* #f)
+  (kill-by-name "radial-menu" *active-pool*)
+  (none))
